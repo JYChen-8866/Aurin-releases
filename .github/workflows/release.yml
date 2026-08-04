@@ -1,0 +1,335 @@
+name: Build Aurin Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Immutable Aurin source tag or commit"
+        required: true
+        type: string
+      release_tag:
+        description: "Public release tag, for example v0.1.22"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: never
+  CDITOR_REV: 112214d6a11462a039f74437a3ab31ac6eb2afae
+  COMET_REV: b30821e99464222354fba7121504677e44493f7b
+  GPUI_COMPONENT_REV: 8a07c48487597c639a89450c86da574b7cd5535a
+  RELEASE_TAG: ${{ inputs.release_tag }}
+
+jobs:
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate inputs
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          [[ "${SOURCE_REF}" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$ ]]
+          [[ "${SOURCE_REF}" != *..* ]]
+          [[ "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]
+
+      - name: Create public release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "Aurin ${RELEASE_TAG}" \
+              --notes "Aurin desktop installers and SHA-256 checksums."
+          fi
+
+  build-macos-arm64:
+    name: macOS Apple Silicon
+    needs: prepare-release
+    runs-on: macos-14
+    timeout-minutes: 120
+    env:
+      RUSTFLAGS: "-C target-cpu=apple-m1"
+    steps:
+      - name: Check out private Aurin source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: JYChen-8866/Aurin
+          ref: ${{ inputs.source_ref }}
+          path: Aurin
+          ssh-key: ${{ secrets.AURIN_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Check out Cditor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: JYChen-8866/Cditor
+          ref: ${{ env.CDITOR_REV }}
+          path: CDitor-V2
+          persist-credentials: false
+
+      - name: Check out gpui-component
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: JYChen-8866/gpui-component
+          ref: ${{ env.GPUI_COMPONENT_REV }}
+          path: gpui-component-main/gpui-component-main
+          persist-credentials: false
+
+      - name: Check out comet
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: JYChen-8866/comet
+          ref: ${{ env.COMET_REV }}
+          path: comet-main
+          persist-credentials: false
+
+      - name: Reclaim runner disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          selected_xcode="$(cd "$(dirname "$(dirname "$(xcode-select -p)")")" && pwd -P)"
+          for candidate in /Applications/Xcode*.app; do
+            if [[ ! -e "${candidate}" ]]; then
+              sudo rm -f "${candidate}"
+              continue
+            fi
+            candidate_path="$(cd "${candidate}" && pwd -P)"
+            if [[ "${candidate_path}" != "${selected_xcode}" ]]; then
+              sudo rm -rf "${candidate}"
+            fi
+          done
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes
+          sudo rm -rf /usr/local/lib/android /usr/local/share/powershell
+          sudo rm -rf /Users/runner/Library/Android/sdk /opt/hostedtoolcache/CodeQL
+
+      - name: Install Rust target
+        run: rustup target add aarch64-apple-darwin
+
+      - name: Verify release profile
+        working-directory: Aurin
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'opt-level = 3' Cargo.toml
+          grep -Fq 'lto = "fat"' Cargo.toml
+          grep -Fq 'codegen-units = 1' Cargo.toml
+          grep -Fq 'strip = "symbols"' Cargo.toml
+          grep -Fq 'panic = "abort"' Cargo.toml
+
+      - name: Build private source
+        working-directory: Aurin
+        shell: bash
+        env:
+          AURIN_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          build_log="${RUNNER_TEMP}/aurin-build.log"
+          if ! cargo build --locked --release --target aarch64-apple-darwin -p aurin-desktop >"${build_log}" 2>&1; then
+            echo "::error::Aurin build failed. Compiler output is suppressed because this is a public workflow."
+            exit 1
+          fi
+          rm -f "${build_log}"
+
+      - name: Package DMG
+        working-directory: Aurin
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          binary="target/aarch64-apple-darwin/release/aurin-desktop"
+          artifact="aurin-desktop-v${version}-macos-arm64.dmg"
+          app="dist/Aurin.app"
+          contents="${app}/Contents"
+          dmg_root="dist/dmg-root"
+
+          test -x "${binary}"
+          test -f "assets/Aurin.icns"
+          mkdir -p "${contents}/MacOS" "${contents}/Resources" "${dmg_root}"
+          install -m 755 "${binary}" "${contents}/MacOS/Aurin"
+          install -m 644 "assets/Aurin.icns" "${contents}/Resources/Aurin.icns"
+
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Aurin' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string Aurin' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Aurin.icns' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string io.github.jychen8866.aurin' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleInfoDictionaryVersion string 6.0' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleName string Aurin' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${version}" "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${version}" "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :LSApplicationCategoryType string public.app-category.productivity' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :NSHighResolutionCapable bool true' "${contents}/Info.plist"
+
+          plutil -lint "${contents}/Info.plist" >/dev/null
+          codesign --force --deep --sign - "${app}" >/dev/null
+          codesign --verify --deep --strict "${app}"
+          ditto "${app}" "${dmg_root}/Aurin.app"
+          rm -rf target "${app}"
+          ln -s /Applications "${dmg_root}/Applications"
+          hdiutil create -quiet -volname Aurin -srcfolder "${dmg_root}" -format UDZO "dist/${artifact}"
+          shasum -a 256 "dist/${artifact}" > "dist/${artifact}.sha256"
+
+      - name: Upload macOS build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Aurin-macOS-arm64
+          path: |
+            Aurin/dist/*.dmg
+            Aurin/dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish DMG
+        working-directory: Aurin
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}" dist/*.dmg dist/*.dmg.sha256 \
+            --repo "${GITHUB_REPOSITORY}" --clobber
+
+  build-windows-x64:
+    name: Windows x64
+    needs: prepare-release
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      RUSTFLAGS: "-C target-cpu=x86-64-v3"
+    steps:
+      - name: Check out private Aurin source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: JYChen-8866/Aurin
+          ref: ${{ inputs.source_ref }}
+          path: Aurin
+          ssh-key: ${{ secrets.AURIN_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Check out Cditor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: JYChen-8866/Cditor
+          ref: ${{ env.CDITOR_REV }}
+          path: CDitor-V2
+          persist-credentials: false
+
+      - name: Check out gpui-component
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: JYChen-8866/gpui-component
+          ref: ${{ env.GPUI_COMPONENT_REV }}
+          path: gpui-component-main/gpui-component-main
+          persist-credentials: false
+
+      - name: Check out comet
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: JYChen-8866/comet
+          ref: ${{ env.COMET_REV }}
+          path: comet-main
+          persist-credentials: false
+
+      - name: Install Rust target
+        shell: pwsh
+        run: rustup target add x86_64-pc-windows-msvc
+
+      - name: Verify release profile
+        working-directory: Aurin
+        shell: pwsh
+        run: |
+          $content = Get-Content Cargo.toml -Raw
+          @('opt-level = 3', 'lto = "fat"', 'codegen-units = 1', 'strip = "symbols"', 'panic = "abort"') |
+            ForEach-Object { if (-not $content.Contains($_)) { throw 'Invalid release profile' } }
+
+      - name: Build private source
+        working-directory: Aurin
+        shell: pwsh
+        env:
+          AURIN_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'aurin-build.log'
+          cargo build --locked --release --target x86_64-pc-windows-msvc -p aurin-desktop *> $log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error 'Aurin build failed. Compiler output is suppressed because this is a public workflow.'
+            exit 1
+          }
+          Remove-Item $log -Force
+
+      - name: Package EXE
+        working-directory: Aurin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_TAG.TrimStart('v')
+          $source = 'target/x86_64-pc-windows-msvc/release/aurin-desktop.exe'
+          $artifact = "aurin-desktop-v$version-windows-x64.exe"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item $source "dist/$artifact"
+          $hash = (Get-FileHash "dist/$artifact" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $artifact" | Set-Content -NoNewline "dist/$artifact.sha256"
+
+      - name: Upload Windows build artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Aurin-Windows-x64
+          path: |
+            Aurin/dist/*.exe
+            Aurin/dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish EXE
+        working-directory: Aurin
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload $env:RELEASE_TAG (Get-ChildItem dist/*.exe).FullName (Get-ChildItem dist/*.exe.sha256).FullName `
+            --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  publish-checksums:
+    name: Publish Combined Checksums
+    needs: [build-macos-arm64, build-windows-x64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Generate checksum manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          cd release
+          sha256sum "aurin-desktop-v${version}-macos-arm64.dmg" > SHA256SUMS.txt
+          sha256sum "aurin-desktop-v${version}-windows-x64.exe" >> SHA256SUMS.txt
+
+      - name: Publish checksum manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}" release/SHA256SUMS.txt \
+            --repo "${GITHUB_REPOSITORY}" --clobber
