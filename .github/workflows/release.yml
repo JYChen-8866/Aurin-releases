@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       release_tag:
-        description: "Public release tag, for example v0.1.22"
+        description: "Public release tag, for example v0.1.23"
         required: true
         type: string
 
@@ -22,7 +22,7 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: never
-  CDITOR_REV: 112214d6a11462a039f74437a3ab31ac6eb2afae
+  CDITOR_REV: f8851ab284d03d0366ab915428c735694da58a78
   COMET_REV: b30821e99464222354fba7121504677e44493f7b
   GPUI_COMPONENT_REV: 8a07c48487597c639a89450c86da574b7cd5535a
   RELEASE_TAG: ${{ inputs.release_tag }}
