@@ -66,7 +66,7 @@ jobs:
       RUSTFLAGS: "-C target-cpu=apple-m1"
     steps:
       - name: Check out private Aurin source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: JYChen-8866/Aurin
           ref: ${{ inputs.source_ref }}
@@ -75,7 +75,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out Cditor
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: JYChen-8866/Cditor
           ref: ${{ env.CDITOR_REV }}
@@ -83,7 +83,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out gpui-component
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: JYChen-8866/gpui-component
           ref: ${{ env.GPUI_COMPONENT_REV }}
@@ -91,7 +91,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out comet
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: JYChen-8866/comet
           ref: ${{ env.COMET_REV }}
@@ -140,7 +140,15 @@ jobs:
         run: |
           set -euo pipefail
           build_log="${RUNNER_TEMP}/aurin-build.log"
-          if ! cargo build --locked --release --target aarch64-apple-darwin -p aurin-desktop >"${build_log}" 2>&1; then
+          cargo build --locked --release --target aarch64-apple-darwin -p aurin-desktop >"${build_log}" 2>&1 &
+          build_pid=$!
+          while kill -0 "${build_pid}" 2>/dev/null; do
+            sleep 60
+            if kill -0 "${build_pid}" 2>/dev/null; then
+              echo "Aurin macOS build is still running; compiler output remains private."
+            fi
+          done
+          if ! wait "${build_pid}"; then
             echo "::error::Aurin build failed. Compiler output is suppressed because this is a public workflow."
             exit 1
           fi
@@ -187,7 +195,7 @@ jobs:
           shasum -a 256 "dist/${artifact}" > "dist/${artifact}.sha256"
 
       - name: Upload macOS build artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: Aurin-macOS-arm64
           path: |
@@ -214,7 +222,7 @@ jobs:
       RUSTFLAGS: "-C target-cpu=x86-64-v3"
     steps:
       - name: Check out private Aurin source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: JYChen-8866/Aurin
           ref: ${{ inputs.source_ref }}
@@ -223,7 +231,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out Cditor
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: JYChen-8866/Cditor
           ref: ${{ env.CDITOR_REV }}
@@ -231,7 +239,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out gpui-component
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: JYChen-8866/gpui-component
           ref: ${{ env.GPUI_COMPONENT_REV }}
@@ -239,7 +247,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out comet
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: JYChen-8866/comet
           ref: ${{ env.COMET_REV }}
@@ -264,13 +272,20 @@ jobs:
         env:
           AURIN_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          $log = Join-Path $env:RUNNER_TEMP 'aurin-build.log'
-          cargo build --locked --release --target x86_64-pc-windows-msvc -p aurin-desktop *> $log
-          if ($LASTEXITCODE -ne 0) {
+          $stdoutLog = Join-Path $env:RUNNER_TEMP 'aurin-build.stdout.log'
+          $stderrLog = Join-Path $env:RUNNER_TEMP 'aurin-build.stderr.log'
+          $process = Start-Process -FilePath (Get-Command cargo).Source `
+            -ArgumentList @('build', '--locked', '--release', '--target', 'x86_64-pc-windows-msvc', '-p', 'aurin-desktop') `
+            -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -NoNewWindow -PassThru
+          while (-not $process.WaitForExit(60000)) {
+            Write-Host 'Aurin Windows build is still running; compiler output remains private.'
+          }
+          $process.WaitForExit()
+          if ($process.ExitCode -ne 0) {
             Write-Error 'Aurin build failed. Compiler output is suppressed because this is a public workflow.'
             exit 1
           }
-          Remove-Item $log -Force
+          Remove-Item $stdoutLog, $stderrLog -Force
 
       - name: Package EXE
         working-directory: Aurin
@@ -286,7 +301,7 @@ jobs:
           "$hash  $artifact" | Set-Content -NoNewline "dist/$artifact.sha256"
 
       - name: Upload Windows build artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: Aurin-Windows-x64
           path: |
@@ -311,7 +326,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Download packaged artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           path: release
           merge-multiple: true
