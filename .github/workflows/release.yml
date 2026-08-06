@@ -22,9 +22,9 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: never
-  CDITOR_REV: 2d0a1d4a678761d69c193eded560bd98d482662f
-  COMET_REV: 3546a515dd92e37356d602c57c86c0caef620448
-  GPUI_COMPONENT_REV: dab89d73f6f342c4e77e04d2b0e0e166c3b730cf
+  CDITOR_REV: 5e75d59e45afc48ed1ce0427cbc43696b296a24a
+  COMET_REV: a4bc6995f7d0ca3f34850fe091a153f63c54ff76
+  GPUI_COMPONENT_REV: 5030394f9c6891fdfdc4dcd334a9fc5e7479c16a
   RELEASE_TAG: ${{ inputs.release_tag }}
 
 jobs:
@@ -140,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           build_log="${RUNNER_TEMP}/aurin-build.log"
-          cargo build --locked --release --target aarch64-apple-darwin -p aurin-desktop >"${build_log}" 2>&1 &
+          cargo build --locked --release --target aarch64-apple-darwin -p aurin-desktop -p aurin-update-helper >"${build_log}" 2>&1 &
           build_pid=$!
           while kill -0 "${build_pid}" 2>/dev/null; do
             sleep 60
@@ -161,15 +161,18 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           binary="target/aarch64-apple-darwin/release/aurin-desktop"
+          helper="target/aarch64-apple-darwin/release/aurin-update-helper"
           artifact="aurin-desktop-v${version}-macos-arm64.dmg"
+          update_archive="aurin-desktop-v${version}-macos-arm64.zip"
           app="dist/Aurin.app"
           contents="${app}/Contents"
           dmg_root="dist/dmg-root"
 
           test -x "${binary}"
           test -f "assets/Aurin.icns"
-          mkdir -p "${contents}/MacOS" "${contents}/Resources" "${dmg_root}"
+          mkdir -p "${contents}/MacOS" "${contents}/Helpers" "${contents}/Resources" "${dmg_root}"
           install -m 755 "${binary}" "${contents}/MacOS/Aurin"
+          install -m 755 "${helper}" "${contents}/Helpers/aurin-update-helper"
           install -m 644 "assets/Aurin.icns" "${contents}/Resources/Aurin.icns"
 
           /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Aurin' "${contents}/Info.plist"
@@ -184,10 +187,24 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Add :LSApplicationCategoryType string public.app-category.productivity' "${contents}/Info.plist"
           /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "${contents}/Info.plist"
           /usr/libexec/PlistBuddy -c 'Add :NSHighResolutionCapable bool true' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes array' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0 dict' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeName string Markdown Document' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Editor' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:LSHandlerRank string Alternate' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:LSItemContentTypes array' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string net.daringfireball.markdown' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions array' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0 string md' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:1 string markdown' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:2 string mdown' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:3 string mkd' "${contents}/Info.plist"
 
           plutil -lint "${contents}/Info.plist" >/dev/null
           codesign --force --deep --sign - "${app}" >/dev/null
           codesign --verify --deep --strict "${app}"
+          ditto -c -k --keepParent "${app}" "dist/${update_archive}"
+          shasum -a 256 "dist/${update_archive}" > "dist/${update_archive}.sha256"
           ditto "${app}" "${dmg_root}/Aurin.app"
           rm -rf target "${app}"
           ln -s /Applications "${dmg_root}/Applications"
@@ -200,6 +217,7 @@ jobs:
           name: Aurin-macOS-arm64
           path: |
             Aurin/dist/*.dmg
+            Aurin/dist/*.zip
             Aurin/dist/*.sha256
           if-no-files-found: error
 
@@ -210,7 +228,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release upload "${RELEASE_TAG}" dist/*.dmg dist/*.dmg.sha256 \
+          gh release upload "${RELEASE_TAG}" dist/*.dmg dist/*.zip dist/*.sha256 \
             --repo "${GITHUB_REPOSITORY}" --clobber
 
   build-windows-x64:
@@ -258,6 +276,10 @@ jobs:
         shell: pwsh
         run: rustup target add x86_64-pc-windows-msvc
 
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
       - name: Verify release profile
         working-directory: Aurin
         shell: pwsh
@@ -287,7 +309,7 @@ jobs:
           }
           Remove-Item $stdoutLog, $stderrLog -Force
 
-      - name: Package EXE
+      - name: Package portable EXE and installer
         working-directory: Aurin
         shell: pwsh
         run: |
@@ -295,10 +317,19 @@ jobs:
           $version = $env:RELEASE_TAG.TrimStart('v')
           $source = 'target/x86_64-pc-windows-msvc/release/aurin-desktop.exe'
           $artifact = "aurin-desktop-v$version-windows-x64.exe"
+          $installer = "aurin-desktop-v$version-windows-x64-setup.exe"
+          $productVersion = "$(($version -split '-')[0]).0"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item $source "dist/$artifact"
+          $sourcePath = (Resolve-Path $source).Path
+          $installerPath = (Join-Path (Resolve-Path dist).Path $installer)
+          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          & $makensis "/DVERSION=$version" "/DPRODUCT_VERSION=$productVersion" "/DSOURCE_EXE=$sourcePath" "/DOUT_FILE=$installerPath" packaging/windows/Aurin.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $hash = (Get-FileHash "dist/$artifact" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $artifact" | Set-Content -NoNewline "dist/$artifact.sha256"
+          $installerHash = (Get-FileHash "dist/$installer" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$installerHash  $installer" | Set-Content -NoNewline "dist/$installer.sha256"
 
       - name: Upload Windows build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -338,7 +369,9 @@ jobs:
           version="${RELEASE_TAG#v}"
           cd release
           sha256sum "aurin-desktop-v${version}-macos-arm64.dmg" > SHA256SUMS.txt
+          sha256sum "aurin-desktop-v${version}-macos-arm64.zip" >> SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-windows-x64.exe" >> SHA256SUMS.txt
+          sha256sum "aurin-desktop-v${version}-windows-x64-setup.exe" >> SHA256SUMS.txt
 
       - name: Publish checksum manifest
         shell: bash
