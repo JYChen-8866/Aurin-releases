@@ -117,6 +117,10 @@ jobs:
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes
           sudo rm -rf /usr/local/lib/android /usr/local/share/powershell
           sudo rm -rf /Users/runner/Library/Android/sdk /opt/hostedtoolcache/CodeQL
+          sudo rm -rf "${RUNNER_TOOL_CACHE}" 2>/dev/null || true
+          rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
+          rm -rf "$HOME/.npm" "$HOME/.cache/pip" "$HOME/.cache/go-build" 2>/dev/null || true
+          rm -rf "$HOME/Library/Developer/Xcode/DerivedData" 2>/dev/null || true
 
       - name: Install Rust target
         run: rustup target add aarch64-apple-darwin
@@ -295,6 +299,31 @@ jobs:
           ref: ${{ env.COMET_REV }}
           path: comet-main
           persist-credentials: false
+
+      - name: Free disk space before build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'SilentlyContinue'
+          $paths = @(
+            'C:\Program Files\Android',
+            'C:\Program Files (x86)\Android',
+            'C:\Program Files\dotnet',
+            'C:\Program Files\Go',
+            'C:\Program Files\Java',
+            'C:\Program Files\jdk-*',
+            'C:\Program Files\Microsoft SQL Server',
+            'C:\Program Files\nodejs',
+            'C:\Program Files\Python*',
+            'C:\Program Files\Ruby*',
+            "$env:LOCALAPPDATA\Android",
+            "$env:LOCALAPPDATA\Microsoft\vcpkg",
+            'C:\vcpkg'
+          )
+          foreach ($path in $paths) {
+            Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item "$env:USERPROFILE\.cargo\registry" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "$env:USERPROFILE\.cargo\git" -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Install Rust target
         shell: pwsh
