@@ -22,7 +22,7 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: never
-  CDITOR_REV: 5e75d59e45afc48ed1ce0427cbc43696b296a24a
+  CDITOR_REV: cf2ccf2e95729c86563796dd41f5b136093c5bca
   COMET_REV: a4bc6995f7d0ca3f34850fe091a153f63c54ff76
   GPUI_COMPONENT_REV: 641a9ecabc3e209aba7fdc9e1deb46fa25c9bba4
   RELEASE_TAG: ${{ inputs.release_tag }}
