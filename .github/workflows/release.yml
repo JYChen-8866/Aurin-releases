@@ -121,6 +121,19 @@ jobs:
       - name: Install Rust target
         run: rustup target add aarch64-apple-darwin
 
+      - name: Restore cargo build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            Aurin/target
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}
+          restore-keys: |
+            aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-
+            aurin-cargo-${{ runner.os }}-
+
       - name: Verify release profile
         working-directory: Aurin
         shell: bash
@@ -153,6 +166,17 @@ jobs:
             exit 1
           fi
           rm -f "${build_log}"
+
+      - name: Save cargo build cache
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            Aurin/target
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ github.run_id }}
 
       - name: Package DMG
         working-directory: Aurin
@@ -280,6 +304,19 @@ jobs:
         shell: pwsh
         run: choco install nsis --no-progress -y
 
+      - name: Restore cargo build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            Aurin/target
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}
+          restore-keys: |
+            aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-
+            aurin-cargo-${{ runner.os }}-
+
       - name: Verify release profile
         working-directory: Aurin
         shell: pwsh
@@ -309,6 +346,17 @@ jobs:
           }
           Remove-Item $stdoutLog, $stderrLog -Force
 
+      - name: Save cargo build cache
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            Aurin/target
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ github.run_id }}
+
       - name: Package portable EXE and installer
         working-directory: Aurin
         shell: pwsh
@@ -324,7 +372,8 @@ jobs:
           $sourcePath = (Resolve-Path $source).Path
           $installerPath = (Join-Path (Resolve-Path dist).Path $installer)
           $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
-          & $makensis "/DVERSION=$version" "/DPRODUCT_VERSION=$productVersion" "/DSOURCE_EXE=$sourcePath" "/DOUT_FILE=$installerPath" packaging/windows/Aurin.nsi
+          $nsiPath = (Resolve-Path 'packaging/windows/Aurin.nsi').Path
+          & $makensis "/DVERSION=$version" "/DPRODUCT_VERSION=$productVersion" "/DSOURCE_EXE=$sourcePath" "/DOUT_FILE=$installerPath" $nsiPath
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $hash = (Get-FileHash "dist/$artifact" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $artifact" | Set-Content -NoNewline "dist/$artifact.sha256"
