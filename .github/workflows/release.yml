@@ -155,25 +155,9 @@ jobs:
         env:
           AURIN_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          set -euo pipefail
-          build_log="${RUNNER_TEMP}/aurin-build.log"
-          cargo build --locked --release --target aarch64-apple-darwin -p aurin-desktop -p aurin-update-helper >"${build_log}" 2>&1 &
-          build_pid=$!
-          while kill -0 "${build_pid}" 2>/dev/null; do
-            sleep 60
-            if kill -0 "${build_pid}" 2>/dev/null; then
-              echo "Aurin macOS build is still running; compiler output remains private."
-            fi
-          done
-          if ! wait "${build_pid}"; then
-            echo "::group::Aurin macOS build log tail"
-            tail -n 100 "${build_log}" 2>/dev/null || true
-            echo "::endgroup::"
-            df -h
-            echo "::error::Aurin build failed. Compiler output is suppressed because this is a public workflow."
-            exit 1
-          fi
-          rm -f "${build_log}"
+          set -eo pipefail
+          cargo build --locked --release --target aarch64-apple-darwin \
+            -p aurin-desktop -p aurin-update-helper 2>&1 | tee "${RUNNER_TEMP}/aurin-build.log"
 
       - name: Save cargo build cache
         if: ${{ github.ref == 'refs/heads/main' }}
