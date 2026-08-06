@@ -166,6 +166,10 @@ jobs:
             fi
           done
           if ! wait "${build_pid}"; then
+            echo "::group::Aurin macOS build log tail"
+            tail -n 100 "${build_log}" 2>/dev/null || true
+            echo "::endgroup::"
+            df -h
             echo "::error::Aurin build failed. Compiler output is suppressed because this is a public workflow."
             exit 1
           fi
@@ -370,6 +374,10 @@ jobs:
           }
           $process.WaitForExit()
           if ($process.ExitCode -ne 0) {
+            Write-Host 'Aurin Windows build failed. Compiler output tail:'
+            if (Test-Path $stderrLog) { Get-Content $stderrLog -Tail 100 }
+            if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 100 }
+            Get-PSDrive C | Select-Object Used,Free
             Write-Error 'Aurin build failed. Compiler output is suppressed because this is a public workflow.'
             exit 1
           }
