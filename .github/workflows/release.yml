@@ -24,7 +24,7 @@ env:
   CARGO_TERM_COLOR: never
   CDITOR_REV: 5e75d59e45afc48ed1ce0427cbc43696b296a24a
   COMET_REV: a4bc6995f7d0ca3f34850fe091a153f63c54ff76
-  GPUI_COMPONENT_REV: 5030394f9c6891fdfdc4dcd334a9fc5e7479c16a
+  GPUI_COMPONENT_REV: 641a9ecabc3e209aba7fdc9e1deb46fa25c9bba4
   RELEASE_TAG: ${{ inputs.release_tag }}
 
 jobs:
