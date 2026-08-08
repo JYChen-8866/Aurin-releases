@@ -22,9 +22,10 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: never
-  CDITOR_REV: 67e545f75f2577c08807073a50c8b2a5f45bdcee
+  CDITOR_REV: 803e10fc1b147a60aaf45bc331cb7817f56d065c
   COMET_REV: a4bc6995f7d0ca3f34850fe091a153f63c54ff76
-  GPUI_COMPONENT_REV: 641a9ecabc3e209aba7fdc9e1deb46fa25c9bba4
+  GPUI_COMPONENT_REV: 6a4a6b6acbb7ff28c076ae8627932b77eeb38437
+  GPUI_REV: 349cb520b79ec1a9838f9389b9f86557ef3767dd
   RELEASE_TAG: ${{ inputs.release_tag }}
 
 jobs:
@@ -82,6 +83,14 @@ jobs:
           path: CDitor-V2
           persist-credentials: false
 
+      - name: Check out GPUI mobile fork
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/zed
+          ref: ${{ env.GPUI_REV }}
+          path: zed-gpui-mobile
+          persist-credentials: false
+
       - name: Check out gpui-component
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -133,7 +142,7 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin
             Aurin/target
-          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}
           restore-keys: |
             aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-
             aurin-cargo-${{ runner.os }}-
@@ -168,7 +177,7 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin
             Aurin/target
-          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ github.run_id }}
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}-${{ github.run_id }}
 
       - name: Package DMG
         working-directory: Aurin
@@ -272,6 +281,14 @@ jobs:
           path: CDitor-V2
           persist-credentials: false
 
+      - name: Check out GPUI mobile fork
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/zed
+          ref: ${{ env.GPUI_REV }}
+          path: zed-gpui-mobile
+          persist-credentials: false
+
       - name: Check out gpui-component
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -329,7 +346,7 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin
             Aurin/target
-          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}
           restore-keys: |
             aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-
             aurin-cargo-${{ runner.os }}-
@@ -376,7 +393,7 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin
             Aurin/target
-          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ github.run_id }}
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}-${{ github.run_id }}
 
       - name: Package portable EXE and installer
         working-directory: Aurin
