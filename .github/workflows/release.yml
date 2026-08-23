@@ -22,7 +22,7 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: never
-  CDITOR_REV: 926f36b5a2bd237d3c7e6bf6ae1c871a6f856eae
+  CDITOR_REV: f65357dbbb32298345213e59ab64545bbe3858a4
   COMET_REV: d1ac1940dafbb26a93ff0b54870782b7f58e6c5a
   GPUI_COMPONENT_REV: bbda72579c940d71a432a8eb963b15ebcd4f997a
   GPUI_REV: 0844ce6fdab1d66a5363fb7b48eaf634934bec91
@@ -134,6 +134,18 @@ jobs:
       - name: Install Rust target
         run: rustup target add aarch64-apple-darwin
 
+      - name: Prepare bundled FFmpeg runtime
+        working-directory: CDitor-V2
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/packaging/setup_ffmpeg.sh aarch64-apple-darwin
+          resources="components/cditor-video/resources/binaries"
+          test -x "${resources}/ffmpeg-aarch64-apple-darwin"
+          test -x "${resources}/ffprobe-aarch64-apple-darwin"
+          "${resources}/ffmpeg-aarch64-apple-darwin" -version >/dev/null
+          "${resources}/ffprobe-aarch64-apple-darwin" -version >/dev/null
+
       - name: Restore cargo build cache
         uses: actions/cache/restore@v4
         with:
@@ -191,13 +203,21 @@ jobs:
           update_archive="aurin-desktop-v${version}-macos-arm64.zip"
           app="dist/Aurin.app"
           contents="${app}/Contents"
+          bundled_runtime="../CDitor-V2/components/cditor-video/resources/binaries"
+          runtime_resources="${contents}/Resources/binaries"
           dmg_root="dist/dmg-root"
 
           test -x "${binary}"
           test -f "assets/Aurin.icns"
-          mkdir -p "${contents}/MacOS" "${contents}/Helpers" "${contents}/Resources" "${dmg_root}"
+          test -x "${bundled_runtime}/ffmpeg-aarch64-apple-darwin"
+          test -x "${bundled_runtime}/ffprobe-aarch64-apple-darwin"
+          mkdir -p "${contents}/MacOS" "${contents}/Helpers" "${runtime_resources}" "${dmg_root}"
           install -m 755 "${binary}" "${contents}/MacOS/Aurin"
           install -m 755 "${helper}" "${contents}/Helpers/aurin-update-helper"
+          install -m 755 \
+            "${bundled_runtime}/ffmpeg-aarch64-apple-darwin" \
+            "${bundled_runtime}/ffprobe-aarch64-apple-darwin" \
+            "${runtime_resources}/"
           install -m 644 "assets/Aurin.icns" "${contents}/Resources/Aurin.icns"
 
           /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Aurin' "${contents}/Info.plist"
@@ -226,6 +246,10 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:3 string mkd' "${contents}/Info.plist"
 
           plutil -lint "${contents}/Info.plist" >/dev/null
+          test -x "${runtime_resources}/ffmpeg-aarch64-apple-darwin"
+          test -x "${runtime_resources}/ffprobe-aarch64-apple-darwin"
+          codesign --force --sign - "${runtime_resources}/ffmpeg-aarch64-apple-darwin" >/dev/null
+          codesign --force --sign - "${runtime_resources}/ffprobe-aarch64-apple-darwin" >/dev/null
           codesign --force --deep --sign - "${app}" >/dev/null
           codesign --verify --deep --strict "${app}"
           ditto -c -k --keepParent "${app}" "dist/${update_archive}"
@@ -338,6 +362,18 @@ jobs:
         shell: pwsh
         run: choco install nsis --no-progress -y
 
+      - name: Prepare bundled FFmpeg runtime
+        working-directory: CDitor-V2
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/packaging/setup_ffmpeg.sh x86_64-pc-windows-msvc
+          resources="components/cditor-video/resources/binaries"
+          test -x "${resources}/ffmpeg-x86_64-pc-windows-msvc.exe"
+          test -x "${resources}/ffprobe-x86_64-pc-windows-msvc.exe"
+          "${resources}/ffmpeg-x86_64-pc-windows-msvc.exe" -version >/dev/null
+          "${resources}/ffprobe-x86_64-pc-windows-msvc.exe" -version >/dev/null
+
       - name: Restore cargo build cache
         uses: actions/cache/restore@v4
         with:
@@ -395,26 +431,48 @@ jobs:
             Aurin/target
           key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}-${{ github.run_id }}
 
-      - name: Package portable EXE and installer
+      - name: Package portable archive and installer
         working-directory: Aurin
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $version = $env:RELEASE_TAG.TrimStart('v')
           $source = 'target/x86_64-pc-windows-msvc/release/aurin-desktop.exe'
-          $artifact = "aurin-desktop-v$version-windows-x64.exe"
+          $portableArtifact = "aurin-desktop-v$version-windows-x64-portable.zip"
           $installer = "aurin-desktop-v$version-windows-x64-setup.exe"
           $productVersion = "$(($version -split '-')[0]).0"
+          $runtimeDirectory = '../CDitor-V2/components/cditor-video/resources/binaries'
+          $ffmpeg = Join-Path $runtimeDirectory 'ffmpeg-x86_64-pc-windows-msvc.exe'
+          $ffprobe = Join-Path $runtimeDirectory 'ffprobe-x86_64-pc-windows-msvc.exe'
+          $portableRoot = 'dist/portable/Aurin'
+          $portableBinaries = Join-Path $portableRoot 'binaries'
+
+          foreach ($requiredFile in @($source, $ffmpeg, $ffprobe)) {
+            if (-not (Test-Path -PathType Leaf $requiredFile)) {
+              throw "Missing required package input: $requiredFile"
+            }
+          }
+
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item $source "dist/$artifact"
+          New-Item -ItemType Directory -Force -Path $portableBinaries | Out-Null
+          Copy-Item $source (Join-Path $portableRoot 'Aurin.exe')
+          Copy-Item $ffmpeg $portableBinaries
+          Copy-Item $ffprobe $portableBinaries
+          Compress-Archive -Path $portableRoot -DestinationPath "dist/$portableArtifact" -CompressionLevel Optimal
+
           $sourcePath = (Resolve-Path $source).Path
+          $ffmpegPath = (Resolve-Path $ffmpeg).Path
+          $ffprobePath = (Resolve-Path $ffprobe).Path
           $installerPath = (Join-Path (Resolve-Path dist).Path $installer)
           $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
           $nsiPath = (Resolve-Path 'packaging/windows/Aurin.nsi').Path
-          & $makensis "/DVERSION=$version" "/DPRODUCT_VERSION=$productVersion" "/DSOURCE_EXE=$sourcePath" "/DOUT_FILE=$installerPath" $nsiPath
+          & $makensis "/DVERSION=$version" "/DPRODUCT_VERSION=$productVersion" `
+            "/DSOURCE_EXE=$sourcePath" "/DFFMPEG_EXE=$ffmpegPath" "/DFFPROBE_EXE=$ffprobePath" `
+            "/DOUT_FILE=$installerPath" $nsiPath
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $hash = (Get-FileHash "dist/$artifact" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $artifact" | Set-Content -NoNewline "dist/$artifact.sha256"
+
+          $portableHash = (Get-FileHash "dist/$portableArtifact" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$portableHash  $portableArtifact" | Set-Content -NoNewline "dist/$portableArtifact.sha256"
           $installerHash = (Get-FileHash "dist/$installer" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$installerHash  $installer" | Set-Content -NoNewline "dist/$installer.sha256"
 
@@ -424,16 +482,20 @@ jobs:
           name: Aurin-Windows-x64
           path: |
             Aurin/dist/*.exe
+            Aurin/dist/*.zip
             Aurin/dist/*.sha256
           if-no-files-found: error
 
-      - name: Publish EXE
+      - name: Publish Windows packages
         working-directory: Aurin
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload $env:RELEASE_TAG (Get-ChildItem dist/*.exe).FullName (Get-ChildItem dist/*.exe.sha256).FullName `
+          gh release upload $env:RELEASE_TAG `
+            (Get-ChildItem dist/*.exe).FullName `
+            (Get-ChildItem dist/*.zip).FullName `
+            (Get-ChildItem dist/*.sha256).FullName `
             --repo $env:GITHUB_REPOSITORY --clobber
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -457,7 +519,7 @@ jobs:
           cd release
           sha256sum "aurin-desktop-v${version}-macos-arm64.dmg" > SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-macos-arm64.zip" >> SHA256SUMS.txt
-          sha256sum "aurin-desktop-v${version}-windows-x64.exe" >> SHA256SUMS.txt
+          sha256sum "aurin-desktop-v${version}-windows-x64-portable.zip" >> SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-windows-x64-setup.exe" >> SHA256SUMS.txt
 
       - name: Publish checksum manifest
