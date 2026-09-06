@@ -22,7 +22,7 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: never
-  CDITOR_REV: 49af7f73d4354062d8aae2f45281e484b2189278
+  CDITOR_REV: d9301eb5683aa85710fb1113a56adcd8aada2018
   COMET_REV: 29880f14b11581add69b737e9f738f177507f7b4
   GPUI_COMPONENT_REV: bbda72579c940d71a432a8eb963b15ebcd4f997a
   GPUI_REV: ccac43fe9a344cd8c3a9caa933db246b92d6f5d4
@@ -80,7 +80,7 @@ jobs:
         with:
           repository: JYChen-8866/Cditor
           ref: ${{ env.CDITOR_REV }}
-          path: CDitor-V2
+          path: CDitor
           persist-credentials: false
 
       - name: Check out GPUI mobile fork
@@ -135,7 +135,7 @@ jobs:
         run: rustup target add aarch64-apple-darwin
 
       - name: Prepare bundled FFmpeg runtime
-        working-directory: CDitor-V2
+        working-directory: CDitor
         shell: bash
         run: |
           set -euo pipefail
@@ -203,7 +203,7 @@ jobs:
           update_archive="aurin-desktop-v${version}-macos-arm64.zip"
           app="dist/Aurin.app"
           contents="${app}/Contents"
-          bundled_runtime="../CDitor-V2/components/cditor-video/resources/binaries"
+          bundled_runtime="../CDitor/components/cditor-video/resources/binaries"
           runtime_resources="${contents}/Resources/binaries"
           dmg_root="dist/dmg-root"
 
@@ -302,7 +302,7 @@ jobs:
         with:
           repository: JYChen-8866/Cditor
           ref: ${{ env.CDITOR_REV }}
-          path: CDitor-V2
+          path: CDitor
           persist-credentials: false
 
       - name: Check out GPUI mobile fork
@@ -363,7 +363,7 @@ jobs:
         run: choco install nsis --no-progress -y
 
       - name: Prepare bundled FFmpeg runtime
-        working-directory: CDitor-V2
+        working-directory: CDitor
         shell: bash
         run: |
           set -euo pipefail
@@ -441,7 +441,7 @@ jobs:
           $portableArtifact = "aurin-desktop-v$version-windows-x64-portable.zip"
           $installer = "aurin-desktop-v$version-windows-x64-setup.exe"
           $productVersion = "$(($version -split '-')[0]).0"
-          $runtimeDirectory = '../CDitor-V2/components/cditor-video/resources/binaries'
+          $runtimeDirectory = '../CDitor/components/cditor-video/resources/binaries'
           $ffmpeg = Join-Path $runtimeDirectory 'ffmpeg-x86_64-pc-windows-msvc.exe'
           $ffprobe = Join-Path $runtimeDirectory 'ffprobe-x86_64-pc-windows-msvc.exe'
           $portableRoot = 'dist/portable/Aurin'
