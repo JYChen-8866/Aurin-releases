@@ -280,6 +280,228 @@ jobs:
           gh release upload "${RELEASE_TAG}" dist/*.dmg dist/*.zip dist/*.sha256 \
             --repo "${GITHUB_REPOSITORY}" --clobber
 
+  build-macos-x64:
+    name: macOS Intel
+    needs: prepare-release
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    env:
+      RUSTFLAGS: "-C target-cpu=x86-64"
+    steps:
+      - name: Check out private Aurin source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/Aurin
+          ref: ${{ inputs.source_ref }}
+          path: Aurin
+          ssh-key: ${{ secrets.AURIN_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Check out Cditor
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/Cditor
+          ref: ${{ env.CDITOR_REV }}
+          path: CDitor
+          persist-credentials: false
+
+      - name: Check out GPUI mobile fork
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/zed
+          ref: ${{ env.GPUI_REV }}
+          path: zed-gpui-mobile
+          persist-credentials: false
+
+      - name: Check out gpui-component
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/gpui-component
+          ref: ${{ env.GPUI_COMPONENT_REV }}
+          path: gpui-component-main/gpui-component-main
+          persist-credentials: false
+
+      - name: Check out comet
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/comet
+          ref: ${{ env.COMET_REV }}
+          path: comet-main
+          persist-credentials: false
+
+      - name: Reclaim runner disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          selected_xcode="$(cd "$(dirname "$(dirname "$(xcode-select -p)")")" && pwd -P)"
+          for candidate in /Applications/Xcode*.app; do
+            if [[ ! -e "${candidate}" ]]; then
+              sudo rm -f "${candidate}"
+              continue
+            fi
+            candidate_path="$(cd "${candidate}" && pwd -P)"
+            if [[ "${candidate_path}" != "${selected_xcode}" ]]; then
+              sudo rm -rf "${candidate}"
+            fi
+          done
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes
+          sudo rm -rf /usr/local/lib/android /usr/local/share/powershell
+          sudo rm -rf /Users/runner/Library/Android/sdk /opt/hostedtoolcache/CodeQL
+          sudo rm -rf "${RUNNER_TOOL_CACHE}" 2>/dev/null || true
+          rm -rf "$HOME/.cargo/registry" "$HOME/.cargo/git" 2>/dev/null || true
+          rm -rf "$HOME/.npm" "$HOME/.cache/pip" "$HOME/.cache/go-build" 2>/dev/null || true
+          rm -rf "$HOME/Library/Developer/Xcode/DerivedData" 2>/dev/null || true
+
+      - name: Install Rust target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Prepare bundled FFmpeg runtime
+        working-directory: CDitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/packaging/setup_ffmpeg.sh x86_64-apple-darwin
+          resources="components/cditor-video/resources/binaries"
+          test -x "${resources}/ffmpeg-x86_64-apple-darwin"
+          test -x "${resources}/ffprobe-x86_64-apple-darwin"
+          "${resources}/ffmpeg-x86_64-apple-darwin" -version >/dev/null
+          "${resources}/ffprobe-x86_64-apple-darwin" -version >/dev/null
+
+      - name: Restore cargo build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            Aurin/target
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}
+          restore-keys: |
+            aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-
+            aurin-cargo-${{ runner.os }}-
+
+      - name: Verify release profile
+        working-directory: Aurin
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'opt-level = 3' Cargo.toml
+          grep -Fq 'lto = "fat"' Cargo.toml
+          grep -Fq 'codegen-units = 1' Cargo.toml
+          grep -Fq 'strip = "symbols"' Cargo.toml
+          grep -Fq 'panic = "abort"' Cargo.toml
+
+      - name: Build private source
+        working-directory: Aurin
+        shell: bash
+        env:
+          AURIN_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -eo pipefail
+          cargo build --locked --release --target x86_64-apple-darwin \
+            -p aurin-desktop -p aurin-update-helper 2>&1 | tee "${RUNNER_TEMP}/aurin-build.log"
+
+      - name: Save cargo build cache
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            Aurin/target
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}-${{ github.run_id }}
+
+      - name: Package DMG
+        working-directory: Aurin
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          binary="target/x86_64-apple-darwin/release/aurin-desktop"
+          helper="target/x86_64-apple-darwin/release/aurin-update-helper"
+          artifact="aurin-desktop-v${version}-macos-x64.dmg"
+          update_archive="aurin-desktop-v${version}-macos-x64.zip"
+          app="dist/Aurin.app"
+          contents="${app}/Contents"
+          bundled_runtime="../CDitor/components/cditor-video/resources/binaries"
+          runtime_resources="${contents}/Resources/binaries"
+          dmg_root="dist/dmg-root"
+
+          test -x "${binary}"
+          test -f "assets/Aurin.icns"
+          test -x "${bundled_runtime}/ffmpeg-x86_64-apple-darwin"
+          test -x "${bundled_runtime}/ffprobe-x86_64-apple-darwin"
+          mkdir -p "${contents}/MacOS" "${contents}/Helpers" "${runtime_resources}" "${dmg_root}"
+          install -m 755 "${binary}" "${contents}/MacOS/Aurin"
+          install -m 755 "${helper}" "${contents}/Helpers/aurin-update-helper"
+          install -m 755 \
+            "${bundled_runtime}/ffmpeg-x86_64-apple-darwin" \
+            "${bundled_runtime}/ffprobe-x86_64-apple-darwin" \
+            "${runtime_resources}/"
+          install -m 644 "assets/Aurin.icns" "${contents}/Resources/Aurin.icns"
+
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Aurin' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string Aurin' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string Aurin.icns' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string io.github.jychen8866.aurin' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleInfoDictionaryVersion string 6.0' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleName string Aurin' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${version}" "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${version}" "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :LSApplicationCategoryType string public.app-category.productivity' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :NSHighResolutionCapable bool true' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes array' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0 dict' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeName string Markdown Document' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Editor' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:LSHandlerRank string Alternate' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:LSItemContentTypes array' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string net.daringfireball.markdown' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions array' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0 string md' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:1 string markdown' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:2 string mdown' "${contents}/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:3 string mkd' "${contents}/Info.plist"
+
+          plutil -lint "${contents}/Info.plist" >/dev/null
+          test -x "${runtime_resources}/ffmpeg-x86_64-apple-darwin"
+          test -x "${runtime_resources}/ffprobe-x86_64-apple-darwin"
+          codesign --force --sign - "${runtime_resources}/ffmpeg-x86_64-apple-darwin" >/dev/null
+          codesign --force --sign - "${runtime_resources}/ffprobe-x86_64-apple-darwin" >/dev/null
+          codesign --force --deep --sign - "${app}" >/dev/null
+          codesign --verify --deep --strict "${app}"
+          ditto -c -k --keepParent "${app}" "dist/${update_archive}"
+          shasum -a 256 "dist/${update_archive}" > "dist/${update_archive}.sha256"
+          ditto "${app}" "${dmg_root}/Aurin.app"
+          rm -rf target "${app}"
+          ln -s /Applications "${dmg_root}/Applications"
+          hdiutil create -quiet -volname Aurin -srcfolder "${dmg_root}" -format UDZO "dist/${artifact}"
+          shasum -a 256 "dist/${artifact}" > "dist/${artifact}.sha256"
+
+      - name: Upload macOS build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: Aurin-macOS-x64
+          path: |
+            Aurin/dist/*.dmg
+            Aurin/dist/*.zip
+            Aurin/dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish DMG
+        working-directory: Aurin
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}" dist/*.dmg dist/*.zip dist/*.sha256 \
+            --repo "${GITHUB_REPOSITORY}" --clobber
+
   build-windows-x64:
     name: Windows x64
     needs: prepare-release
@@ -501,7 +723,7 @@ jobs:
 
   publish-checksums:
     name: Publish Combined Checksums
-    needs: [build-macos-arm64, build-windows-x64]
+    needs: [build-macos-arm64, build-macos-x64, build-windows-x64]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -519,6 +741,8 @@ jobs:
           cd release
           sha256sum "aurin-desktop-v${version}-macos-arm64.dmg" > SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-macos-arm64.zip" >> SHA256SUMS.txt
+          sha256sum "aurin-desktop-v${version}-macos-x64.dmg" >> SHA256SUMS.txt
+          sha256sum "aurin-desktop-v${version}-macos-x64.zip" >> SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-windows-x64-portable.zip" >> SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-windows-x64-setup.exe" >> SHA256SUMS.txt
 
