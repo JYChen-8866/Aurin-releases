@@ -353,8 +353,10 @@ jobs:
           rm -rf "$HOME/.npm" "$HOME/.cache/pip" "$HOME/.cache/go-build" 2>/dev/null || true
           rm -rf "$HOME/Library/Developer/Xcode/DerivedData" 2>/dev/null || true
 
-      - name: Install Rust target
-        run: rustup target add x86_64-apple-darwin
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
 
       - name: Prepare bundled FFmpeg runtime
         working-directory: CDitor
