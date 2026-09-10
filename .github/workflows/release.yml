@@ -476,7 +476,7 @@ jobs:
           codesign --force --sign - "${contents}/Helpers/aurin-update-helper" >/dev/null
           codesign --force --sign - "${runtime_resources}/ffmpeg-x86_64-apple-darwin" >/dev/null
           codesign --force --sign - "${runtime_resources}/ffprobe-x86_64-apple-darwin" >/dev/null
-          codesign --force --sign - "${app}" >/dev/null
+          codesign --force --deep --sign - "${app}" >/dev/null
           codesign --verify --deep --strict "${app}"
           ditto -c -k --keepParent "${app}" "dist/${update_archive}"
           shasum -a 256 "dist/${update_archive}" > "dist/${update_archive}.sha256"
