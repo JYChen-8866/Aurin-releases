@@ -250,8 +250,12 @@ jobs:
           test -x "${runtime_resources}/ffprobe-aarch64-apple-darwin"
           codesign --force --sign - "${runtime_resources}/ffmpeg-aarch64-apple-darwin" >/dev/null
           codesign --force --sign - "${runtime_resources}/ffprobe-aarch64-apple-darwin" >/dev/null
-          codesign --force --deep --sign - "${app}" >/dev/null
-          codesign --verify --deep --strict "${app}"
+          codesign --force --sign - "${app}" >/dev/null
+          codesign --verify --strict "${app}"
+          codesign --verify --strict "${contents}/MacOS/Aurin"
+          codesign --verify --strict "${contents}/Helpers/aurin-update-helper"
+          codesign --verify --strict "${runtime_resources}/ffmpeg-x86_64-apple-darwin"
+          codesign --verify --strict "${runtime_resources}/ffprobe-x86_64-apple-darwin"
           ditto -c -k --keepParent "${app}" "dist/${update_archive}"
           shasum -a 256 "dist/${update_archive}" > "dist/${update_archive}.sha256"
           ditto "${app}" "${dmg_root}/Aurin.app"
@@ -725,9 +729,192 @@ jobs:
             --repo $env:GITHUB_REPOSITORY --clobber
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+  build-linux-x64:
+    name: UnionTech UOS / Linux x64
+    needs: prepare-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      RUSTFLAGS: "-C target-cpu=x86-64-v2"
+    steps:
+      - name: Check out private Aurin source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/Aurin
+          ref: ${{ inputs.source_ref }}
+          path: Aurin
+          ssh-key: ${{ secrets.AURIN_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Check out Cditor
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/Cditor
+          ref: ${{ env.CDITOR_REV }}
+          path: CDitor
+          persist-credentials: false
+
+      - name: Check out GPUI mobile fork
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/zed
+          ref: ${{ env.GPUI_REV }}
+          path: zed-gpui-mobile
+          persist-credentials: false
+
+      - name: Check out gpui-component
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/gpui-component
+          ref: ${{ env.GPUI_COMPONENT_REV }}
+          path: gpui-component-main/gpui-component-main
+          persist-credentials: false
+
+      - name: Check out comet
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: JYChen-8866/comet
+          ref: ${{ env.COMET_REV }}
+          path: comet-main
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install GPUI Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake mold pkg-config \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev \
+            libssl-dev libvulkan-dev libwayland-dev \
+            libx11-xcb-dev libxcb1-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: Prepare bundled FFmpeg runtime
+        working-directory: CDitor
+        run: |
+          ./scripts/packaging/setup_ffmpeg.sh x86_64-unknown-linux-gnu
+          resources="components/cditor-video/resources/binaries"
+          test -x "${resources}/ffmpeg-x86_64-unknown-linux-gnu"
+          test -x "${resources}/ffprobe-x86_64-unknown-linux-gnu"
+
+      - name: Restore cargo build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            Aurin/target
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}
+          restore-keys: |
+            aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-
+            aurin-cargo-${{ runner.os }}-
+
+      - name: Verify release profile
+        working-directory: Aurin
+        run: |
+          grep -Fq 'opt-level = 3' Cargo.toml
+          grep -Fq 'lto = "fat"' Cargo.toml
+          grep -Fq 'codegen-units = 1' Cargo.toml
+          grep -Fq 'strip = "symbols"' Cargo.toml
+          grep -Fq 'panic = "abort"' Cargo.toml
+
+      - name: Build private source
+        working-directory: Aurin
+        env:
+          AURIN_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: cargo build --locked --release --target x86_64-unknown-linux-gnu -p aurin-desktop
+
+      - name: Save cargo build cache
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            Aurin/target
+          key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}-${{ github.run_id }}
+
+      - name: Package UOS deb and portable archive
+        working-directory: Aurin
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          binary="target/x86_64-unknown-linux-gnu/release/aurin-desktop"
+          runtime="../CDitor/components/cditor-video/resources/binaries"
+          portable="dist/aurin-desktop-v${version}-linux-x64"
+          deb_root="dist/deb"
+          deb="aurin-desktop-v${version}-linux-x64.deb"
+          archive="aurin-desktop-v${version}-linux-x64.tar.gz"
+          test -x "${binary}"
+          test -x "${runtime}/ffmpeg-x86_64-unknown-linux-gnu"
+          test -x "${runtime}/ffprobe-x86_64-unknown-linux-gnu"
+
+          mkdir -p "${portable}/binaries"
+          install -m 755 "${binary}" "${portable}/aurin-desktop"
+          install -m 755 "${runtime}/ffmpeg-x86_64-unknown-linux-gnu" "${portable}/binaries/"
+          install -m 755 "${runtime}/ffprobe-x86_64-unknown-linux-gnu" "${portable}/binaries/"
+          tar -czf "dist/${archive}" -C dist "aurin-desktop-v${version}-linux-x64"
+          shasum -a 256 "dist/${archive}" > "dist/${archive}.sha256"
+
+          mkdir -p "${deb_root}/DEBIAN" "${deb_root}/opt/aurin/binaries" \
+            "${deb_root}/usr/bin" "${deb_root}/usr/share/applications" \
+            "${deb_root}/usr/share/icons/hicolor/512x512/apps"
+          install -m 755 "${binary}" "${deb_root}/opt/aurin/aurin-desktop"
+          install -m 755 "${runtime}/ffmpeg-x86_64-unknown-linux-gnu" "${deb_root}/opt/aurin/binaries/"
+          install -m 755 "${runtime}/ffprobe-x86_64-unknown-linux-gnu" "${deb_root}/opt/aurin/binaries/"
+          install -m 644 assets/aurin.png "${deb_root}/usr/share/icons/hicolor/512x512/apps/aurin.png"
+          ln -s /opt/aurin/aurin-desktop "${deb_root}/usr/bin/aurin"
+          cat > "${deb_root}/usr/share/applications/aurin.desktop" <<'DESKTOP'
+          [Desktop Entry]
+          Name=Aurin
+          Comment=Local-first notes workspace
+          Exec=/opt/aurin/aurin-desktop
+          Icon=aurin
+          Type=Application
+          Categories=Office;Utility;
+          Terminal=false
+          StartupWMClass=Aurin
+          DESKTOP
+          cat > "${deb_root}/DEBIAN/control" <<CONTROL
+          Package: aurin
+          Version: ${version}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Aurin
+          Description: Aurin local-first notes workspace
+          Depends: libgtk-3-0, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-xcb1, libxcb1, libxcb-render0, libxcb-shape0, libxcb-xfixes0, libvulkan1, libasound2, libfontconfig1, libfreetype6
+          CONTROL
+          dpkg-deb --build "${deb_root}" "dist/${deb}"
+          shasum -a 256 "dist/${deb}" > "dist/${deb}.sha256"
+
+      - name: Upload Linux build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: Aurin-Linux-x64
+          path: |
+            Aurin/dist/*.deb
+            Aurin/dist/*.tar.gz
+            Aurin/dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish Linux packages
+        working-directory: Aurin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${RELEASE_TAG}" dist/*.deb dist/*.tar.gz dist/*.sha256 \
+            --repo "${GITHUB_REPOSITORY}" --clobber
+
   publish-checksums:
     name: Publish Combined Checksums
-    needs: [build-macos-arm64, build-macos-x64, build-windows-x64]
+    needs: [build-macos-arm64, build-macos-x64, build-windows-x64, build-linux-x64]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -747,6 +934,8 @@ jobs:
           sha256sum "aurin-desktop-v${version}-macos-arm64.zip" >> SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-macos-x64.dmg" >> SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-macos-x64.zip" >> SHA256SUMS.txt
+          sha256sum "aurin-desktop-v${version}-linux-x64.deb" >> SHA256SUMS.txt
+          sha256sum "aurin-desktop-v${version}-linux-x64.tar.gz" >> SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-windows-x64-portable.zip" >> SHA256SUMS.txt
           sha256sum "aurin-desktop-v${version}-windows-x64-setup.exe" >> SHA256SUMS.txt
 
