@@ -376,7 +376,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cargo/bin
             Aurin/target
           key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}
           restore-keys: |
@@ -413,7 +412,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cargo/bin
             Aurin/target
           key: aurin-cargo-${{ runner.os }}-${{ hashFiles('Aurin/Cargo.lock') }}-${{ env.CDITOR_REV }}-${{ env.COMET_REV }}-${{ env.GPUI_COMPONENT_REV }}-${{ env.GPUI_REV }}-${{ github.run_id }}
 
