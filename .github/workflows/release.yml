@@ -22,7 +22,7 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: never
-  CDITOR_REV: a4da85ec600423c6948d70541e41a95d2d132fed
+  CDITOR_REV: f7e7abb730b262d211f5938e00e3691a6c15ca9c
   COMET_REV: 010d22d9b1f7516f5ceac5887b0e93bc2e6fd2aa
   GPUI_COMPONENT_REV: bbda72579c940d71a432a8eb963b15ebcd4f997a
   GPUI_REV: ccac43fe9a344cd8c3a9caa933db246b92d6f5d4
@@ -401,6 +401,8 @@ jobs:
           AURIN_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -eo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo --version
           cargo build --locked --release --target x86_64-apple-darwin \
             -p aurin-desktop -p aurin-update-helper 2>&1 | tee "${RUNNER_TEMP}/aurin-build.log"
 
