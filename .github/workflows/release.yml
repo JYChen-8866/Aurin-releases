@@ -248,14 +248,16 @@ jobs:
           plutil -lint "${contents}/Info.plist" >/dev/null
           test -x "${runtime_resources}/ffmpeg-aarch64-apple-darwin"
           test -x "${runtime_resources}/ffprobe-aarch64-apple-darwin"
+          codesign --force --sign - "${contents}/MacOS/Aurin" >/dev/null
+          codesign --force --sign - "${contents}/Helpers/aurin-update-helper" >/dev/null
           codesign --force --sign - "${runtime_resources}/ffmpeg-aarch64-apple-darwin" >/dev/null
           codesign --force --sign - "${runtime_resources}/ffprobe-aarch64-apple-darwin" >/dev/null
           codesign --force --sign - "${app}" >/dev/null
           codesign --verify --strict "${app}"
           codesign --verify --strict "${contents}/MacOS/Aurin"
           codesign --verify --strict "${contents}/Helpers/aurin-update-helper"
-          codesign --verify --strict "${runtime_resources}/ffmpeg-x86_64-apple-darwin"
-          codesign --verify --strict "${runtime_resources}/ffprobe-x86_64-apple-darwin"
+          codesign --verify --strict "${runtime_resources}/ffmpeg-aarch64-apple-darwin"
+          codesign --verify --strict "${runtime_resources}/ffprobe-aarch64-apple-darwin"
           ditto -c -k --keepParent "${app}" "dist/${update_archive}"
           shasum -a 256 "dist/${update_archive}" > "dist/${update_archive}.sha256"
           ditto "${app}" "${dmg_root}/Aurin.app"
@@ -480,8 +482,12 @@ jobs:
           codesign --force --sign - "${contents}/Helpers/aurin-update-helper" >/dev/null
           codesign --force --sign - "${runtime_resources}/ffmpeg-x86_64-apple-darwin" >/dev/null
           codesign --force --sign - "${runtime_resources}/ffprobe-x86_64-apple-darwin" >/dev/null
-          codesign --force --deep --sign - "${app}" >/dev/null
-          codesign --verify --deep --strict "${app}"
+          codesign --force --sign - "${app}" >/dev/null
+          codesign --verify --strict "${app}"
+          codesign --verify --strict "${contents}/MacOS/Aurin"
+          codesign --verify --strict "${contents}/Helpers/aurin-update-helper"
+          codesign --verify --strict "${runtime_resources}/ffmpeg-x86_64-apple-darwin"
+          codesign --verify --strict "${runtime_resources}/ffprobe-x86_64-apple-darwin"
           ditto -c -k --keepParent "${app}" "dist/${update_archive}"
           shasum -a 256 "dist/${update_archive}" > "dist/${update_archive}.sha256"
           ditto "${app}" "${dmg_root}/Aurin.app"
