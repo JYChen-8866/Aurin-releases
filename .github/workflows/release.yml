@@ -22,7 +22,7 @@ concurrency:
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: never
-  CDITOR_REV: db68af92782271dec4231812aaee32a1dd1b9689
+  CDITOR_REV: 08edc0bace17223ae309e65db47b9126a0d0991a
   COMET_REV: 010d22d9b1f7516f5ceac5887b0e93bc2e6fd2aa
   GPUI_COMPONENT_REV: bbda72579c940d71a432a8eb963b15ebcd4f997a
   GPUI_REV: ccac43fe9a344cd8c3a9caa933db246b92d6f5d4
@@ -472,9 +472,11 @@ jobs:
           plutil -lint "${contents}/Info.plist" >/dev/null
           test -x "${runtime_resources}/ffmpeg-x86_64-apple-darwin"
           test -x "${runtime_resources}/ffprobe-x86_64-apple-darwin"
+          codesign --force --sign - "${contents}/MacOS/Aurin" >/dev/null
+          codesign --force --sign - "${contents}/Helpers/aurin-update-helper" >/dev/null
           codesign --force --sign - "${runtime_resources}/ffmpeg-x86_64-apple-darwin" >/dev/null
           codesign --force --sign - "${runtime_resources}/ffprobe-x86_64-apple-darwin" >/dev/null
-          codesign --force --deep --sign - "${app}" >/dev/null
+          codesign --force --sign - "${app}" >/dev/null
           codesign --verify --deep --strict "${app}"
           ditto -c -k --keepParent "${app}" "dist/${update_archive}"
           shasum -a 256 "dist/${update_archive}" > "dist/${update_archive}.sha256"
